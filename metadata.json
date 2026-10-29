@@ -1,0 +1,8 @@
+{
+  "name": "Remix GhostProof",
+  "description": "Fact-check AI-generated claims against web evidence and inspect code for security and quality issues with Gemma.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
