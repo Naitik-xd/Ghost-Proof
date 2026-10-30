@@ -74,17 +74,55 @@ function recordGlobalAiRequest(): void {
   globalAiRequestTimestamps.push(Date.now());
 }
 
+function extractModelText(response: any): string | null {
+  if (!response) return null;
+  if (typeof response.text === 'string' && response.text.trim()) {
+    return response.text.trim();
+  }
+  const candidate = response.candidates?.[0];
+  if (candidate?.content?.parts) {
+    // 1. Check for standard response text (non-thought parts)
+    const normalText = candidate.content.parts
+      .filter((p: any) => !p.thought && p.text)
+      .map((p: any) => p.text)
+      .join('\n')
+      .trim();
+    if (normalText) return normalText;
+
+    // 2. If the model output text within thought parts, extract it
+    const anyText = candidate.content.parts
+      .map((p: any) => p.text || '')
+      .join('\n')
+      .trim();
+    if (anyText) return anyText;
+  }
+  return null;
+}
+
 /**
- * Execute prompt with Gemma model sequence and resilient fallback
+ * Execute prompt with Gemma model priority sequence and resilient fallback
  */
 async function callGemma(prompt: string, instructionPrefix?: string): Promise<{ text: string; modelUsed: string } | null> {
   const fullPrompt = instructionPrefix ? `${instructionPrefix}\n\n${prompt}` : prompt;
+  const startTime = Date.now();
 
   for (let i = 0; i < GEMMA_MODELS.length; i++) {
     const modelName = GEMMA_MODELS[i];
     const isPrimary = i === 0;
+
+    // Remaining total budget (strictly staying within Vercel 55s limit)
+    const elapsedSoFar = Date.now() - startTime;
+    const remainingBudgetMs = Math.max(3000, 52000 - elapsedSoFar);
+    if (remainingBudgetMs < 4000) {
+      console.warn(`[AI Engine] Execution budget near Vercel 60s limit (${elapsedSoFar}ms elapsed). Breaking.`);
+      break;
+    }
+
+    // Allocate per-model timeout: Gemma gets up to 22s, fallbacks get 10-14s
+    const perModelMax = modelName.includes('gemma') ? 22000 : 12000;
+    const timeoutMs = Math.min(perModelMax, remainingBudgetMs - 2000);
+
     try {
-      const timeoutMs = modelName.includes('gemma') ? 35000 : 25000;
       console.log(`[AI Engine] Attempting ${isPrimary ? 'primary' : 'fallback'} model: ${modelName} (timeout: ${timeoutMs}ms)`);
 
       const timeoutPromise = new Promise<never>((_, reject) =>
@@ -95,21 +133,22 @@ async function callGemma(prompt: string, instructionPrefix?: string): Promise<{ 
         model: modelName,
         contents: fullPrompt,
         config: {
-          temperature: 0.2,
-          maxOutputTokens: 2048,
+          temperature: 0.15,
+          systemInstruction: 'You are a concise code and factual auditor. Skip preliminary chain-of-thought analysis and directly output the requested JSON format.',
         },
       });
 
       const response = await Promise.race([generatePromise, timeoutPromise]);
+      const extractedText = extractModelText(response);
 
-      if (response && response.text) {
-        console.log(`[AI Engine] Successfully generated response with ${modelName}`);
-        return { text: response.text, modelUsed: modelName };
+      if (extractedText) {
+        console.log(`[AI Engine] Successfully generated response with ${modelName} in ${Date.now() - startTime}ms`);
+        return { text: extractedText, modelUsed: modelName };
       }
     } catch (err: any) {
       const is503 = err?.message?.includes('503') || err?.message?.includes('high demand') || err?.message?.includes('UNAVAILABLE');
       if (is503) {
-        console.warn(`[AI Engine] Model ${modelName} is experiencing temporary high demand (503). Switching immediately to next fallback...`);
+        console.warn(`[AI Engine] Model ${modelName} returned 503 (High Demand). Switching immediately to next model...`);
       } else {
         console.warn(`[AI Engine] ${isPrimary ? 'Primary' : 'Fallback'} model ${modelName} invocation failed:`, err?.message || err);
       }
@@ -738,7 +777,7 @@ app.post('/api/code-review', async (req, res) => {
       const aScore = priorityKeywords.some((k) => a.path.toLowerCase().includes(k)) ? 1 : 0;
       const bScore = priorityKeywords.some((k) => b.path.toLowerCase().includes(k)) ? 1 : 0;
       return bScore - aScore;
-    }).slice(0, 3);
+    }).slice(0, 2);
 
     const sanitizedFilesForModel = aiCandidateFiles.map((f) => {
       let content = f.content;
@@ -747,7 +786,7 @@ app.post('/api/code-review', async (req, res) => {
       });
       return {
         path: f.path,
-        content: content.slice(0, 1600),
+        content: content.slice(0, 1200),
       };
     });
 
@@ -755,11 +794,11 @@ app.post('/api/code-review', async (req, res) => {
       .map((f) => `File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
       .join('\n\n');
 
-    const reviewPrompt = `You are an elite code security auditor. Inspect the following source files for vulnerabilities, backdoors, and logic bugs. Return at most 5 high-priority findings.
+    const reviewPrompt = `Identify security vulnerabilities in the source code snippets below. Return at most 4 critical findings.
 
 ${fileSnippets}
 
-Respond strictly with a JSON array formatted as:
+Strictly output a JSON array:
 [
   {
     "category": "security" | "bug" | "maintainability" | "secret",
@@ -767,7 +806,7 @@ Respond strictly with a JSON array formatted as:
     "title": "Clear concise vulnerability title",
     "file": "path",
     "line": 1,
-    "description": "Specific explanation of the security flaw or risk",
+    "description": "Specific explanation of the security flaw",
     "codeSnippet": "code snippet",
     "remediation": "Concrete actionable fix"
   }
