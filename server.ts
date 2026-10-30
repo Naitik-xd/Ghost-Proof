@@ -29,13 +29,12 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Priority Gemma 4 models with high-availability resilient fallbacks
+// Priority Gemma 4 models with token-efficient lightweight fallbacks
 const GEMMA_MODELS = [
   'gemma-4-26b-a4b-it',    // Priority 1: Gemma 4 26B
   'gemma-4-31b-it',        // Priority 2: Gemma 4 31B
-  'gemini-3.8-flash',       // Fallback 1: Gemini 3.8 Flash (fastest generation, high capacity)
-  'gemini-2.5-flash',       // Fallback 2: Gemini 2.5 Flash
-  'gemini-2.5-flash-lite',  // Fallback 3: Gemini 2.5 Flash Lite (resilient against 503 spikes)
+  'gemini-2.5-flash',       // Fallback 1: Gemini 2.5 Flash
+  'gemini-2.5-flash-lite',  // Fallback 2: Gemini 2.5 Flash Lite (ultra-lightweight token saver & resilient to 503 spikes)
 ];
 
 // ==========================================

@@ -8,12 +8,14 @@ GhostProof is a high-precision developer utility and analytical tool designed to
 
 ## ⚡ Model Architecture & Priority Strategy
 
-GhostProof employs a multi-tier model orchestration pipeline:
+GhostProof prioritizes open-weights Gemma models for all reasoning, with lightweight token-efficient fallbacks:
 
-* **Priority Model: Gemma 4 (`gemma-4-26b-a4b-it`)**  
+* **Priority 1: Gemma 4 (`gemma-4-26b-a4b-it`)**  
   All fact-checking assessments and code security audits are routed primarily to Google's open-weights Gemma 4 model.
-* **Automated Fallback: Gemini (`gemini-2.5-flash`)**  
-  If the Gemma 4 service times out or encounters upstream availability issues, the system automatically falls back to Gemini 2.5 Flash, ensuring zero downtime and reliable completion of audits.
+* **Priority 2: Gemma 4 Sibling (`gemma-4-31b-it`)**  
+  Secondary Gemma 4 variant if the 26B variant is unavailable.
+* **Lightweight Token-Saving Fallbacks (`gemini-2.5-flash` & `gemini-2.5-flash-lite`)**  
+  If Gemma encounters temporary upstream availability issues, the system falls back to lightweight Flash models. We intentionally exclude heavier models (like 3.8) to keep inference fast, ultra token-efficient, and immune to high-demand 503 spikes.
 
 ---
 
