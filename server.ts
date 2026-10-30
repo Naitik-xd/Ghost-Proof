@@ -147,8 +147,17 @@ function scanDeterministicSecrets(files: { path: string; content: string }[]): D
   const secrets: DeterministicSecret[] = [];
 
   for (const file of files) {
+    // Skip mock sample datasets and test fixture files from flagging real repo alerts
+    if (/(?:sampleData|sample[_-]data|\.test\.|\.spec\.|fixtures?\/|mocks?\/)/i.test(file.path)) {
+      continue;
+    }
+
     const lines = file.content.split('\n');
     lines.forEach((lineText, idx) => {
+      const trimmed = lineText.trim();
+      // Skip comment lines and regex definitions
+      if (/^(?:\/\/|\*|\/\*|name:|regex:)/.test(trimmed)) return;
+
       for (const pattern of SECRET_PATTERNS) {
         const matches = lineText.match(pattern.regex);
         if (matches) {
@@ -191,9 +200,20 @@ function scanDeterministicVulnerabilities(files: { path: string; content: string
   const flaws: DeterministicFlaw[] = [];
 
   for (const file of files) {
+    // Skip mock sample datasets and test fixture files
+    if (/(?:sampleData|sample[_-]data|\.test\.|\.spec\.|fixtures?\/|mocks?\/)/i.test(file.path)) {
+      continue;
+    }
+
     const lines = file.content.split('\n');
 
     lines.forEach((line, idx) => {
+      const trimmed = line.trim();
+      // Skip comment lines, documentation strings, and rule metadata (prevents scanner from matching its own rules)
+      if (/^(?:\/\/|\*|\/\*|description:|remediation:|title:|name:|regex:)/.test(trimmed)) {
+        return;
+      }
+
       // 1. Hardcoded admin email backdoor / privilege escalation
       if (/(?:user(?:Email|\.email)?\s*===?\s*['"][a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}['"])/i.test(line)) {
         flaws.push({
@@ -251,17 +271,20 @@ function scanDeterministicVulnerabilities(files: { path: string; content: string
       }
 
       // 5. Remote Code Execution / Eval
-      if (/\beval\s*\(/.test(line) || /new\s+Function\s*\(/.test(line) || /child_process.*(?:exec|spawn)\s*\(/.test(line)) {
-        flaws.push({
-          category: 'security',
-          severity: 'critical',
-          title: 'Unsafe Code Execution / Eval Detected',
-          file: file.path,
-          line: idx + 1,
-          description: 'Direct invocation of eval() or shell execution passes raw strings directly to the runtime interpreter.',
-          codeSnippet: line.trim().slice(0, 160),
-          remediation: 'Avoid eval() completely. Parse structured data using JSON.parse() or invoke safe dedicated subprocess APIs.',
-        });
+      // Exclude strings/quotes defining the rule itself
+      if (/(?<!['"`\w])eval\s*\([^)]*\)/.test(line) || /new\s+Function\s*\(/.test(line) || /child_process.*(?:exec|spawn)\s*\(/.test(line)) {
+        if (!/['"`].*eval\s*\(.*['"`]/.test(line) && !/\bregex\b/.test(line)) {
+          flaws.push({
+            category: 'security',
+            severity: 'critical',
+            title: 'Unsafe Code Execution / Eval Detected',
+            file: file.path,
+            line: idx + 1,
+            description: 'Direct invocation of dynamic code evaluation or shell execution passes raw strings directly to the runtime interpreter.',
+            codeSnippet: line.trim().slice(0, 160),
+            remediation: 'Avoid dynamic code execution. Parse structured data using JSON.parse() or invoke safe dedicated subprocess APIs.',
+          });
+        }
       }
 
       // 6. Insecure wildcard CORS
@@ -600,7 +623,12 @@ app.post('/api/github-fetch', async (req, res) => {
 
     // Filter relevant source files
     const ALLOWED_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.php', '.rb', '.json', '.yaml', '.yml', '.sql', '.sh', '.html', '.css'];
-    const IGNORED_PATHS = ['node_modules/', 'dist/', 'build/', '.git/', 'vendor/', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.min.js', '.min.css', '.next/'];
+    const IGNORED_PATHS = [
+      'node_modules/', 'dist/', 'build/', '.git/', 'vendor/',
+      'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+      '.min.js', '.min.css', '.next/',
+      'sampleData.ts', 'sampleData.js', 'samples/', 'mocks/', 'fixtures/', '__tests__/'
+    ];
 
     const filteredFiles = allFiles.filter((f) => {
       const ext = path.extname(f.path).toLowerCase();

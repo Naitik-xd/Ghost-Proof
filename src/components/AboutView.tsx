@@ -96,7 +96,7 @@ export const AboutView: React.FC<AboutViewProps> = () => {
           </p>
         </div>
         <a
-          href="https://github.com"
+          href="https://github.com/Naitik-xd/Ghost-Proof"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-800 dark:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl transition-all whitespace-nowrap cursor-pointer shadow-2xs active:scale-95"

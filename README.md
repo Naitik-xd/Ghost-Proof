@@ -1,5 +1,7 @@
 # GhostProof — AI Fact Checker & Code Reviewer
 
+[![Repository](https://img.shields.io/badge/Repository-Naitik--xd%2FGhost--Proof-emerald?style=flat-square)](https://github.com/Naitik-xd/Ghost-Proof)
+
 GhostProof is a high-precision developer utility and analytical tool designed to verify claims against credible web evidence and inspect source code for security vulnerabilities, hardcoded backdoors, and quality defects.
 
 ---
