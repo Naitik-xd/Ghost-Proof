@@ -29,10 +29,13 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Primary Gemma 4 model with fallback
+// Priority Gemma 4 models with high-availability resilient fallbacks
 const GEMMA_MODELS = [
-  'gemma-4-26b-a4b-it', // Primary priority model
-  'gemini-2.5-flash',    // Fallback model if Gemma times out or encounters errors
+  'gemma-4-26b-a4b-it',    // Priority 1: Gemma 4 26B
+  'gemma-4-31b-it',        // Priority 2: Gemma 4 31B
+  'gemini-3.8-flash',       // Fallback 1: Gemini 3.8 Flash (fastest generation, high capacity)
+  'gemini-2.5-flash',       // Fallback 2: Gemini 2.5 Flash
+  'gemini-2.5-flash-lite',  // Fallback 3: Gemini 2.5 Flash Lite (resilient against 503 spikes)
 ];
 
 // ==========================================
@@ -82,7 +85,7 @@ async function callGemma(prompt: string, instructionPrefix?: string): Promise<{ 
     const modelName = GEMMA_MODELS[i];
     const isPrimary = i === 0;
     try {
-      const timeoutMs = modelName.includes('gemma') ? 22000 : 15000;
+      const timeoutMs = modelName.includes('gemma') ? 35000 : 25000;
       console.log(`[AI Engine] Attempting ${isPrimary ? 'primary' : 'fallback'} model: ${modelName} (timeout: ${timeoutMs}ms)`);
 
       const timeoutPromise = new Promise<never>((_, reject) =>
@@ -94,6 +97,7 @@ async function callGemma(prompt: string, instructionPrefix?: string): Promise<{ 
         contents: fullPrompt,
         config: {
           temperature: 0.2,
+          maxOutputTokens: 2048,
         },
       });
 
@@ -104,8 +108,13 @@ async function callGemma(prompt: string, instructionPrefix?: string): Promise<{ 
         return { text: response.text, modelUsed: modelName };
       }
     } catch (err: any) {
-      console.warn(`[AI Engine] ${isPrimary ? 'Primary' : 'Fallback'} model ${modelName} invocation failed:`, err?.message || err);
-      if (isPrimary && i + 1 < GEMMA_MODELS.length) {
+      const is503 = err?.message?.includes('503') || err?.message?.includes('high demand') || err?.message?.includes('UNAVAILABLE');
+      if (is503) {
+        console.warn(`[AI Engine] Model ${modelName} is experiencing temporary high demand (503). Switching immediately to next fallback...`);
+      } else {
+        console.warn(`[AI Engine] ${isPrimary ? 'Primary' : 'Fallback'} model ${modelName} invocation failed:`, err?.message || err);
+      }
+      if (i + 1 < GEMMA_MODELS.length) {
         console.log(`[AI Engine] Switching to fallback model: ${GEMMA_MODELS[i + 1]}`);
       }
     }
@@ -460,7 +469,7 @@ app.post('/api/fact-check', async (req, res) => {
       .filter(p => p.length >= 15 && p.length <= 300);
 
     if (bulletCandidates.length >= 2) {
-      extractedClaims = bulletCandidates.slice(0, 5);
+      extractedClaims = bulletCandidates.slice(0, 4);
     } else {
       // Split by sentence boundaries (.!?)
       const sentences = text
@@ -468,7 +477,7 @@ app.post('/api/fact-check', async (req, res) => {
         .split(/(?<=[.?!])\s+/)
         .map((s) => s.trim())
         .filter((s) => s.length >= 20 && s.length <= 300);
-      extractedClaims = sentences.slice(0, 5);
+      extractedClaims = sentences.slice(0, 4);
     }
 
     if (extractedClaims.length === 0) {
@@ -730,7 +739,7 @@ app.post('/api/code-review', async (req, res) => {
       const aScore = priorityKeywords.some((k) => a.path.toLowerCase().includes(k)) ? 1 : 0;
       const bScore = priorityKeywords.some((k) => b.path.toLowerCase().includes(k)) ? 1 : 0;
       return bScore - aScore;
-    }).slice(0, 4);
+    }).slice(0, 3);
 
     const sanitizedFilesForModel = aiCandidateFiles.map((f) => {
       let content = f.content;
@@ -739,7 +748,7 @@ app.post('/api/code-review', async (req, res) => {
       });
       return {
         path: f.path,
-        content: content.slice(0, 2500),
+        content: content.slice(0, 1600),
       };
     });
 
@@ -747,7 +756,7 @@ app.post('/api/code-review', async (req, res) => {
       .map((f) => `File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
       .join('\n\n');
 
-    const reviewPrompt = `You are an elite code security auditor. Inspect the following source files for security vulnerabilities, authentication/authorization bypasses, logic bugs, and quality risks.
+    const reviewPrompt = `You are an elite code security auditor. Inspect the following source files for vulnerabilities, backdoors, and logic bugs. Return at most 5 high-priority findings.
 
 ${fileSnippets}
 

@@ -78,7 +78,7 @@ export default function App() {
 
               <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Priority: <strong className="text-slate-800 dark:text-slate-200 font-mono">Gemma 4</strong> <span className="text-[11px] text-slate-400">(Fallback: Gemini 2.5)</span></span>
+                <span>Priority: <strong className="text-slate-800 dark:text-slate-200 font-mono">Gemma 4</strong> <span className="text-[11px] text-slate-400">(Fallback: Gemini Flash)</span></span>
               </div>
             </div>
           </div>
