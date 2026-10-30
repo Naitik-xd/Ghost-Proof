@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Cpu, Lock, FileSearch, Code, Github, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Cpu, Lock, FileSearch, Code, AlertCircle } from 'lucide-react';
 
 interface AboutViewProps {
   isDark?: boolean;
@@ -101,8 +101,8 @@ export const AboutView: React.FC<AboutViewProps> = () => {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-800 dark:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl transition-all whitespace-nowrap cursor-pointer shadow-2xs active:scale-95"
         >
-          <Github className="w-4 h-4" />
-          View on GitHub
+          <Code className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          <span>View Source Repository</span>
         </a>
       </div>
     </div>

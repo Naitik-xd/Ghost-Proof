@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, FileCheck, Code2, Info, Github, Sun, Moon } from 'lucide-react';
+import { ShieldCheck, FileCheck, Code2, Info, Sun, Moon } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: 'fact-checker' | 'code-reviewer' | 'about';
@@ -83,16 +83,16 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, isDark,
             )}
           </button>
 
-          {/* GitHub Open Source Link */}
+          {/* Open Source Project Link */}
           <a
             href="https://github.com"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg transition-all duration-150 whitespace-nowrap cursor-pointer shadow-xs active:scale-95"
-            title="Open Source Hacktoberfest Project"
+            title="Open Source Project"
           >
-            <Github className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-            <span className="hidden sm:inline">Hacktoberfest</span>
+            <Code2 className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+            <span className="hidden sm:inline">Open Source</span>
           </a>
         </div>
       </div>

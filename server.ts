@@ -31,9 +31,46 @@ const ai = new GoogleGenAI({
 
 // Primary Gemma 4 model with fallback
 const GEMMA_MODELS = [
-  'gemma-4-26b-a4b-it',
-  'gemini-2.5-flash',
+  'gemma-4-26b-a4b-it', // Primary priority model
+  'gemini-2.5-flash',    // Fallback model if Gemma times out or encounters errors
 ];
+
+// ==========================================
+// GLOBAL RATE LIMITER (15 requests per 5 hours across all IPs)
+// Protects server-side API key and prevents abuse
+// ==========================================
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 60 * 1000; // 5 hours in milliseconds
+const MAX_GLOBAL_AI_REQUESTS = 15;
+const globalAiRequestTimestamps: number[] = [];
+
+function checkGlobalAiRateLimit(): { allowed: boolean; remaining: number; retryAfterMinutes: number } {
+  const now = Date.now();
+  // Remove timestamps outside the 5-hour rolling window
+  while (globalAiRequestTimestamps.length > 0 && globalAiRequestTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
+    globalAiRequestTimestamps.shift();
+  }
+
+  if (globalAiRequestTimestamps.length >= MAX_GLOBAL_AI_REQUESTS) {
+    const oldest = globalAiRequestTimestamps[0];
+    const retryAfterMs = Math.max(0, oldest + RATE_LIMIT_WINDOW_MS - now);
+    const retryAfterMinutes = Math.max(1, Math.ceil(retryAfterMs / (60 * 1000)));
+    return {
+      allowed: false,
+      remaining: 0,
+      retryAfterMinutes,
+    };
+  }
+
+  return {
+    allowed: true,
+    remaining: MAX_GLOBAL_AI_REQUESTS - globalAiRequestTimestamps.length,
+    retryAfterMinutes: 0,
+  };
+}
+
+function recordGlobalAiRequest(): void {
+  globalAiRequestTimestamps.push(Date.now());
+}
 
 /**
  * Execute prompt with Gemma model sequence and resilient fallback
@@ -41,9 +78,13 @@ const GEMMA_MODELS = [
 async function callGemma(prompt: string, instructionPrefix?: string): Promise<{ text: string; modelUsed: string } | null> {
   const fullPrompt = instructionPrefix ? `${instructionPrefix}\n\n${prompt}` : prompt;
 
-  for (const modelName of GEMMA_MODELS) {
+  for (let i = 0; i < GEMMA_MODELS.length; i++) {
+    const modelName = GEMMA_MODELS[i];
+    const isPrimary = i === 0;
     try {
       const timeoutMs = modelName.includes('gemma') ? 22000 : 15000;
+      console.log(`[AI Engine] Attempting ${isPrimary ? 'primary' : 'fallback'} model: ${modelName} (timeout: ${timeoutMs}ms)`);
+
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('timeout')), timeoutMs)
       );
@@ -59,10 +100,14 @@ async function callGemma(prompt: string, instructionPrefix?: string): Promise<{ 
       const response = await Promise.race([generatePromise, timeoutPromise]);
 
       if (response && response.text) {
+        console.log(`[AI Engine] Successfully generated response with ${modelName}`);
         return { text: response.text, modelUsed: modelName };
       }
     } catch (err: any) {
-      console.warn(`Model ${modelName} invocation failed:`, err?.message || err);
+      console.warn(`[AI Engine] ${isPrimary ? 'Primary' : 'Fallback'} model ${modelName} invocation failed:`, err?.message || err);
+      if (isPrimary && i + 1 < GEMMA_MODELS.length) {
+        console.log(`[AI Engine] Switching to fallback model: ${GEMMA_MODELS[i + 1]}`);
+      }
     }
   }
 
@@ -334,10 +379,19 @@ async function fetchWebEvidence(claims: string[]): Promise<Array<{ claim: string
  * Health check & Model configuration
  */
 app.get('/api/health', (req, res) => {
+  const rateLimitState = checkGlobalAiRateLimit();
   res.json({
     status: 'ok',
     primaryModel: GEMMA_MODELS[0],
+    fallbackModel: GEMMA_MODELS[1],
     models: GEMMA_MODELS,
+    rateLimit: {
+      maxRequests: MAX_GLOBAL_AI_REQUESTS,
+      windowHours: 5,
+      remaining: rateLimitState.remaining,
+      allowed: rateLimitState.allowed,
+      retryAfterMinutes: rateLimitState.retryAfterMinutes,
+    },
     version: '1.0.0',
   });
 });
@@ -345,10 +399,21 @@ app.get('/api/health', (req, res) => {
 /**
  * POST /api/fact-check
  * Accepts input text or document content, extracts claims, retrieves evidence,
- * and calls Gemma 4 for verification.
+ * and calls Gemma 4 (with Gemini fallback) for verification.
+ * Enforces global rate limit of 15 requests per 5 hours across all IPs.
  */
 app.post('/api/fact-check', async (req, res) => {
   try {
+    // Enforce global AI rate limit
+    const rateCheck = checkGlobalAiRateLimit();
+    if (!rateCheck.allowed) {
+      return res.status(429).json({
+        error: `Global AI rate limit reached: Maximum 15 requests per 5 hours exceeded across all users to protect resources and API quotas. Please try again in ~${rateCheck.retryAfterMinutes} minutes.`,
+        retryAfterMinutes: rateCheck.retryAfterMinutes,
+        remaining: 0,
+      });
+    }
+
     const { text } = req.body;
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
       return res.status(400).json({ error: 'Text content is required for fact-checking.' });
@@ -357,6 +422,9 @@ app.post('/api/fact-check', async (req, res) => {
     if (text.length > 15000) {
       return res.status(400).json({ error: 'Input text exceeds 15,000 characters limit. Please shorten the sample.' });
     }
+
+    // Record request against global rate limit
+    recordGlobalAiRequest();
 
     // Step 1: Extract discrete testable factual claims
     const rawParagraphs = text.split(/\n+/).map(p => p.trim()).filter(Boolean);
@@ -592,15 +660,29 @@ app.post('/api/github-fetch', async (req, res) => {
 /**
  * POST /api/code-review
  * Receives files (from GitHub fetch or browser-parsed ZIP), runs deterministic secret & vulnerability scanner,
- * and calls Gemma 4 for in-depth code review findings.
+ * and calls Gemma 4 (with Gemini fallback) for in-depth code review findings.
+ * Enforces global rate limit of 15 requests per 5 hours across all IPs.
  */
 app.post('/api/code-review', async (req, res) => {
   try {
+    // Enforce global AI rate limit
+    const rateCheck = checkGlobalAiRateLimit();
+    if (!rateCheck.allowed) {
+      return res.status(429).json({
+        error: `Global AI rate limit reached: Maximum 15 requests per 5 hours exceeded across all users to protect resources and API quotas. Please try again in ~${rateCheck.retryAfterMinutes} minutes.`,
+        retryAfterMinutes: rateCheck.retryAfterMinutes,
+        remaining: 0,
+      });
+    }
+
     const { targetName, files } = req.body;
 
     if (!Array.isArray(files) || files.length === 0) {
       return res.status(400).json({ error: 'No files provided for code review.' });
     }
+
+    // Record request against global rate limit
+    recordGlobalAiRequest();
 
     // Process all provided files
     const allFilesToScan = files.map((f: any) => ({
@@ -780,4 +862,10 @@ async function startServer() {
   });
 }
 
-startServer();
+// In local dev and standard Node server runtime, start server.
+// In Vercel serverless environment, the exported app is handled by @vercel/node.
+if (process.env.VERCEL !== '1') {
+  startServer();
+}
+
+export default app;
